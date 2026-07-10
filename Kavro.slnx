@@ -1,1 +1,11 @@
-<Solution />
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kavro.Abstractions/Kavro.Abstractions.csproj" />
+    <Project Path="src/Kavro.Storage.Abstractions/Kavro.Storage.Abstractions.csproj" />
+    <Project Path="src/Kavro.Storage.InMemory/Kavro.Storage.InMemory.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Kavro.Storage.ContractTests/Kavro.Storage.ContractTests.csproj" />
+    <Project Path="tests/Kavro.Storage.InMemory.Tests/Kavro.Storage.InMemory.Tests.csproj" />
+  </Folder>
+</Solution>
