@@ -4,6 +4,11 @@
       <ProjectReference Include="..\..\src\Kavro.Storage.Abstractions\Kavro.Storage.Abstractions.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="xunit" />
+      <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    </ItemGroup>
+
     <PropertyGroup>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
