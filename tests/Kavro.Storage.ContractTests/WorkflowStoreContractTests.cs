@@ -88,4 +88,93 @@ public abstract class WorkflowStoreContractTests
         var stillLocked = await Store.LockNextAsync("worker-2", TimeSpan.FromMinutes(5), maxItems: 10);
         Assert.Empty(stillLocked);
     }
+    
+    [Fact]
+    public async Task B1_Expired_lease_makes_message_available_with_incremented_attempt()
+    {
+        await Store.EnqueueAsync(TestData.Msg());
+
+        var first = await Store.LockNextAsync("worker-1", TimeSpan.FromMinutes(5), maxItems: 10);
+        Assert.Equal(1, Assert.Single(first).Attempt);
+
+        // worker-1 "died": does not commit or renew. The lease expires.
+        Time.Advance(TimeSpan.FromMinutes(5).Add(TimeSpan.FromSeconds(1)));
+
+        var reclaimed = await Store.LockNextAsync("worker-2", TimeSpan.FromMinutes(5), maxItems: 10);
+
+        var item = Assert.Single(reclaimed);
+        Assert.Equal(2, item.Attempt);                      // counter has increased
+        Assert.Equal(Now + TimeSpan.FromMinutes(5), item.LeaseExpiresAt); // new lease from current now
+    }
+    
+    [Fact]
+    public async Task B2_RenewLease_extends_expiry()
+    {
+        await Store.EnqueueAsync(TestData.Msg());
+        var item = Assert.Single(await Store.LockNextAsync("worker-1", TimeSpan.FromMinutes(5), maxItems: 10));
+
+        Time.Advance(TimeSpan.FromMinutes(4)); // almost expired
+
+        var renewed = await Store.RenewLeaseAsync(item.MessageId, "worker-1", TimeSpan.FromMinutes(5));
+        Assert.True(renewed);
+
+        // without renewal, the lease would have expired here
+        Time.Advance(TimeSpan.FromMinutes(2));
+
+        var stolen = await Store.LockNextAsync("worker-2", TimeSpan.FromMinutes(5), maxItems: 10);
+        Assert.Empty(stolen); // renewal worked - the message is still for worker-1
+    }
+    
+    [Fact]
+    public async Task B3_RenewLease_fails_for_foreign_or_expired_lease()
+    {
+        await Store.EnqueueAsync(TestData.Msg());
+        var item = Assert.Single(await Store.LockNextAsync("worker-1", TimeSpan.FromMinutes(5), maxItems: 10));
+
+        // someone else's rent
+        Assert.False(await Store.RenewLeaseAsync(item.MessageId, "worker-2", TimeSpan.FromMinutes(5)));
+
+        // expired lease - even the owner can't
+        Time.Advance(TimeSpan.FromMinutes(6));
+        Assert.False(await Store.RenewLeaseAsync(item.MessageId, "worker-1", TimeSpan.FromMinutes(5)));
+
+        // non-existent message
+        Assert.False(await Store.RenewLeaseAsync(messageId: 999_999, "worker-1", TimeSpan.FromMinutes(5)));
+    }
+    
+    [Fact]
+    public async Task C1_CreateInstance_persists_instance_and_start_message_atomically()
+    {
+        var instance = TestData.Instance(instanceId: "wf-1", version: 1);
+        var start = TestData.Msg(instanceId: "wf-1");
+
+        await Store.CreateInstanceAsync(instance, start);
+
+        var stored = await Store.GetInstanceAsync("wf-1");
+        Assert.Equal(instance, stored);
+
+        var items = await Store.LockNextAsync("worker-1", TimeSpan.FromMinutes(1), maxItems: 10);
+        Assert.Equal("wf-1", Assert.Single(items).InstanceId);
+
+        var history = await Store.GetHistoryAsync("wf-1");
+        Assert.Empty(history);
+
+        Assert.Null(await Store.GetInstanceAsync("no-such"));
+    }
+
+    [Fact]
+    public async Task C2_CreateInstance_with_duplicate_id_throws_and_changes_nothing()
+    {
+        await Store.CreateInstanceAsync(TestData.Instance("wf-1", version: 1), TestData.Msg("wf-1"));
+
+        var dup = TestData.Instance("wf-1", version: 99) with { Name = "Other" };
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Store.CreateInstanceAsync(dup, TestData.Msg("wf-1")));
+
+        var stored = await Store.GetInstanceAsync("wf-1");
+        Assert.Equal(1, stored!.Version);
+
+        var items = await Store.LockNextAsync("worker-1", TimeSpan.FromMinutes(1), maxItems: 10);
+        Assert.Single(items);
+    }
 }
